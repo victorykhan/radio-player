@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RadioPlayer — Demo (VAWAM Radio)</title>
+<meta name="description" content="Bespoke embeddable online radio player — live demo running against VAWAM Radio.">
+<style>
+  html,body{margin:0;padding:0;background:#0a0b0e;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .rp-page{padding:40px 16px;width:100%;max-width:520px;}
+  .rp-page h1{color:#f2f3f5;font-size:18px;margin:0 0 6px;}
+  .rp-page p{color:#9aa0ab;font-size:13px;margin:0 0 20px;}
+  .rp-page a{color:#07cbf2;}
+</style>
+</head>
+<body>
+<div class="rp-page">
+  <h1>RadioPlayer — Phase 1 demo</h1>
+  <p>Embedded widget, live against VAWAM Radio's stream + public API. Source: <a href="https://github.com/victorykhan/radio-player">github.com/victorykhan/radio-player</a></p>
+  <div id="radio-player"></div>
+</div>
+
+<script src="radio-player.js"></script>
+<script>
+  RadioPlayer.init({
+    stationId: "vawam-radio",
+    streamUrl: "https://play.vawam.ca/stream.mp3",
+    hlsUrl: "https://play.vawam.ca/hls/master.m3u8",
+    apiBase: "https://play.vawam.ca",
+    theme: "dark",
+    defaultVisualizer: "spectrum"
+  });
+</script>
+</body>
+</html>

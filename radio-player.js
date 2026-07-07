@@ -210,6 +210,7 @@
     + '.rp-share-row{display:flex;gap:8px;padding:10px 16px 16px;flex-wrap:wrap;}'
     + '.rp-share-btn{background:var(--rp-bg-alt);border:1px solid rgba(127,127,127,.3);color:var(--rp-text);border-radius:20px;'
     + 'font-size:11px;padding:6px 10px;cursor:pointer;}'
+    + '.rp-format-label{font-size:10px;color:var(--rp-muted);white-space:nowrap;padding:0 2px;}'
     + '.rp-empty{color:var(--rp-muted);font-style:italic;}'
     + '.rp-toast{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;'
     + 'font-size:11px;padding:6px 12px;border-radius:20px;opacity:0;transition:opacity .2s;pointer-events:none;}'
@@ -452,7 +453,19 @@
     d.eqSelect.value = this.state.eqPreset;
     d.eqSelect.addEventListener('change', function () { self.setEQPreset(this.value); });
 
-    d.controls = el('div', { class: 'rp-controls' }, [d.playBtn, d.volume, d.vizSelect, d.eqSelect]);
+    // Stream quality (populated once hls.js parses the master playlist;
+    // stays hidden for plain MP3 and for native-Safari HLS, where the
+    // browser's own engine handles renditions with no JS-facing API).
+    d.qualitySelect = el('select', { class: 'rp-select' });
+    d.qualitySelect.style.display = 'none';
+    var autoOpt = el('option', { value: '-1' });
+    autoOpt.textContent = 'Auto';
+    d.qualitySelect.appendChild(autoOpt);
+    d.qualitySelect.addEventListener('change', function () { self.setQualityLevel(parseInt(this.value, 10)); });
+
+    d.formatLabel = el('span', { class: 'rp-format-label' }, [document.createTextNode('')]);
+
+    d.controls = el('div', { class: 'rp-controls' }, [d.playBtn, d.volume, d.vizSelect, d.eqSelect, d.qualitySelect, d.formatLabel]);
 
     // Up next
     d.upNextBody = el('div', { class: 'rp-section-body' }, [el('div', { class: 'rp-empty' }, [document.createTextNode('Queue is empty')])]);
@@ -634,10 +647,16 @@
 
       if (canNativeHls) {
         // Safari: native HLS playback works without page-level CORS; only
-        // real FFT analysis needs it (handled by usingCors above).
+        // real FFT analysis needs it (handled by usingCors above). The
+        // browser's own media engine picks renditions internally — there's
+        // no JS API to list/switch them here, so the quality selector stays
+        // hidden and we just label it as native-auto.
+        if (self.hls) { try { self.hls.destroy(); } catch (e) {} self.hls = null; }
         audio.src = cfg.hlsUrl;
         self._connectAudioGraph();
         self._playSafely();
+        self._setFormatLabel('HLS · native (Auto)');
+        if (self.dom.qualitySelect) self.dom.qualitySelect.style.display = 'none';
         return;
       }
       if (useCors && cfg.hlsUrl && global.Hls) {
@@ -661,10 +680,17 @@
   RadioPlayerInstance.prototype._attachHlsJs = function () {
     var self = this;
     var audio = this.audio;
+    if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
     try {
       this.hls = new global.Hls({ liveDurationInfinity: true });
       this.hls.on(global.Hls.Events.ERROR, function (event, data) {
         if (data && data.fatal) self._scheduleReconnect('hls.js fatal error: ' + data.type);
+      });
+      this.hls.on(global.Hls.Events.MANIFEST_PARSED, function (event, data) {
+        self._populateQualityLevels(data.levels);
+      });
+      this.hls.on(global.Hls.Events.LEVEL_SWITCHED, function (event, data) {
+        self._onLevelSwitched(data.level);
       });
       this.hls.loadSource(this.cfg.hlsUrl);
       this.hls.attachMedia(audio);
@@ -675,15 +701,59 @@
     }
   };
 
+  // Populate the quality dropdown from hls.js's parsed renditions. Levels
+  // are labeled High/Medium/Low by descending bitrate (falls back to
+  // "Level N" if there are more than 3 renditions).
+  RadioPlayerInstance.prototype._populateQualityLevels = function (levels) {
+    var sel = this.dom.qualitySelect;
+    if (!sel || !levels || !levels.length) return;
+    while (sel.options.length > 1) sel.remove(1); // keep "Auto", drop stale entries
+    var labels = ['High', 'Medium', 'Low'];
+    levels
+      .map(function (lvl, idx) { return { idx: idx, bitrate: lvl.bitrate }; })
+      .sort(function (a, b) { return b.bitrate - a.bitrate; })
+      .forEach(function (lvl, i) {
+        var name = (labels[i] || ('Level ' + (i + 1))) + ' (' + Math.round(lvl.bitrate / 1000) + ' kbps)';
+        var opt = el('option', { value: String(lvl.idx) });
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
+    sel.value = '-1';
+    sel.style.display = '';
+    this._setFormatLabel('HLS · Auto');
+  };
+
+  RadioPlayerInstance.prototype._onLevelSwitched = function (levelIndex) {
+    if (!this.hls || !this.hls.levels || !this.hls.levels[levelIndex]) return;
+    var kbps = Math.round(this.hls.levels[levelIndex].bitrate / 1000);
+    var mode = this.hls.autoLevelEnabled ? 'Auto' : 'Manual';
+    this._setFormatLabel('HLS · ' + mode + ' (' + kbps + ' kbps)');
+  };
+
+  RadioPlayerInstance.prototype._setFormatLabel = function (text) {
+    if (this.dom.formatLabel) this.dom.formatLabel.textContent = text;
+  };
+
+  // levelIndex: -1 re-enables hls.js's automatic bitrate switching (ABR);
+  // any other index pins playback to that specific rendition.
+  RadioPlayerInstance.prototype.setQualityLevel = function (levelIndex) {
+    if (!this.hls) return;
+    this.hls.currentLevel = levelIndex;
+    if (this.dom.qualitySelect) this.dom.qualitySelect.value = String(levelIndex);
+  };
+
   RadioPlayerInstance.prototype._useMp3 = function () {
     // Plain (non-CORS) playback: always works even when the stream lacks
     // Access-Control-Allow-Origin. Real analyser data will not be available
     // in this mode — the visualizer falls back to simulated motion.
+    if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
     this.audio.crossOrigin = null;
     this.usingCors = false;
     this.audio.src = this.cfg.streamUrl;
     this._connectAudioGraph();
     this._playSafely();
+    this._setFormatLabel('MP3 · direct stream');
+    if (this.dom.qualitySelect) this.dom.qualitySelect.style.display = 'none';
   };
 
   RadioPlayerInstance.prototype._playSafely = function () {
@@ -1013,6 +1083,7 @@
     setVolume: function (v) { if (lastInstance) lastInstance.setVolume(v); },
     setVisualizer: function (name) { if (lastInstance) lastInstance.setVisualizer(name); },
     setEQPreset: function (name) { if (lastInstance) lastInstance.setEQPreset(name); },
+    setQualityLevel: function (levelIndex) { if (lastInstance) lastInstance.setQualityLevel(levelIndex); },
     VISUALIZERS: VISUALIZERS,
     EQ_PRESETS: Object.keys(EQ_PRESETS)
   };

@@ -43,6 +43,7 @@ Works in static HTML today. Same call also works inside a WordPress post/page (C
 - Web Audio enhancements: 6 EQ presets (flat/pop/rock/jazz/classical/vocal) + custom bass/treble/stereo-width/compressor controls — these work regardless of the stream's CORS status.
 - 5 visualizers (spectrum, waveform, circular pulse, particle field, ambient glow) driven by real FFT data when available.
 - Live now-playing, up-next, recently played, and schedule — all wired to the station's real public API.
+- Stream quality control: when `hls.js` is active, a dropdown lists the master playlist's renditions (Auto/High/Medium/Low, labeled with actual kbps) and lets you pin one manually; a small status label always shows the active format (`HLS · Auto (211 kbps)`, `HLS · native (Auto)`, or `MP3 · direct stream`). Hidden automatically when there's nothing to switch (plain MP3, or Safari's native HLS engine, which manages renditions internally with no JS-facing API).
 - LocalStorage persistence for visualizer choice, volume, and EQ preset.
 - Share buttons (WhatsApp, Facebook, Twitter/X, SMS, Instagram-via-clipboard, native Web Share where supported).
 

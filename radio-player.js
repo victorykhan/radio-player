@@ -22,12 +22,12 @@
  *   - Metadata comes from the station's real public API
  *     (/api/public/now-playing, /api/public/history, /api/public/schedule,
  *     /api/settings/public) — all confirmed CORS-open (Access-Control-Allow-Origin: *).
- *   - The audio *stream* endpoints (stream.mp3 / hls/master.m3u8) do NOT currently
- *     send Access-Control-Allow-Origin. The widget detects this at runtime and
- *     degrades gracefully: playback always works via plain <audio>, but real
- *     FFT-based visualizers and HLS-in-non-Safari-browsers require CORS to be
- *     enabled on the stream itself. No code change will be needed when that
- *     happens — detection re-runs on every load.
+ *   - The audio *stream* endpoints (stream.mp3 / hls/master.m3u8) send
+ *     Access-Control-Allow-Origin scoped to this page's origin. The widget
+ *     detects CORS availability at runtime: playback always works via plain
+ *     <audio>, but real FFT-based visualizers and HLS-in-non-Safari-browsers
+ *     require it. No code change is needed if that ever changes — detection
+ *     re-runs on every load.
  */
 (function (global) {
   'use strict';
@@ -224,8 +224,9 @@
 
   // ---------------------------------------------------------------------
   // Visualizer renderers
-  // Each takes (ctx, w, h, data, kind) where data is a Uint8Array (freq or
-  // time-domain depending on visualizer) and kind is 'real' or 'simulated'.
+  // Each takes (ctx, w, h, data, color, idle) where data is a Uint8Array
+  // (freq or time-domain depending on visualizer) and idle is true when
+  // playback is paused/stopped (renderers should not self-animate then).
   // ---------------------------------------------------------------------
 
   var simPhase = 0;
@@ -299,7 +300,7 @@
     },
     particles: (function () {
       var particles = null;
-      return function (ctx, w, h, data, color) {
+      return function (ctx, w, h, data, color, idle) {
         ctx.clearRect(0, 0, w, h);
         var n = 40;
         if (!particles) {
@@ -310,9 +311,13 @@
         }
         for (var j = 0; j < n; j++) {
           var p = particles[j];
-          var v = data[j % data.length] / 255;
-          p.y -= p.vy * (0.5 + v * 2);
-          if (p.y < -10) { p.y = h + 10; p.x = Math.random() * w; }
+          var v = idle ? 0 : (data[j % data.length] / 255);
+          // Freeze position entirely when idle so paused/stopped playback
+          // shows a static frame instead of embers still drifting upward.
+          if (!idle) {
+            p.y -= p.vy * (0.5 + v * 2);
+            if (p.y < -10) { p.y = h + 10; p.x = Math.random() * w; }
+          }
           var size = 1.5 + v * 4;
           ctx.beginPath();
           ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
@@ -916,7 +921,14 @@
       var isTimeDomain = self.state.visualizer === 'waveform';
       var data;
 
-      if (self.analyser && self.usingCors) {
+      if (!self.state.playing) {
+        // Idle: render a flat/silent frame instead of the "simulated energy"
+        // fallback, so the visualizer visibly stops when paused/stopped
+        // rather than continuing to animate.
+        self.simulatedViz = false;
+        data = new Uint8Array(isTimeDomain ? 256 : 128);
+        if (isTimeDomain) data.fill(128); // flat centerline; else stays all-zero (silent)
+      } else if (self.analyser && self.usingCors) {
         var len = isTimeDomain ? self.analyser.fftSize : self.analyser.frequencyBinCount;
         data = new Uint8Array(len);
         if (isTimeDomain) self.analyser.getByteTimeDomainData(data);
@@ -926,21 +938,20 @@
         for (var i = 0; i < data.length; i++) sum += data[i];
         var silentLikely = isTimeDomain ? (sum / data.length > 126 && sum / data.length < 130) : sum === 0;
 
-        if (self.state.playing && silentLikely) {
-          self.corsBlockedFrames++;
-        } else {
-          self.corsBlockedFrames = 0;
-        }
+        self.corsBlockedFrames = silentLikely ? self.corsBlockedFrames + 1 : 0;
         self.simulatedViz = self.corsBlockedFrames > 90; // ~1.5s at 60fps of "no real data while playing"
+
+        if (self.simulatedViz) {
+          data = simulatedBars(isTimeDomain ? 256 : 128);
+          if (isTimeDomain) {
+            for (var k = 0; k < data.length; k++) data[k] = 128 + (data[k] - 128) * 0.4;
+          }
+        }
       } else {
         self.simulatedViz = true;
-      }
-
-      if (self.simulatedViz || !self.state.playing) {
         data = simulatedBars(isTimeDomain ? 256 : 128);
         if (isTimeDomain) {
-          // shift to look like a centered waveform rather than bars
-          for (var k = 0; k < data.length; k++) data[k] = 128 + (data[k] - 128) * 0.4;
+          for (var k2 = 0; k2 < data.length; k2++) data[k2] = 128 + (data[k2] - 128) * 0.4;
         }
       }
 
@@ -948,9 +959,9 @@
         primary: getComputedStyle(self.dom.wrapper).getPropertyValue('--rp-primary').trim() || '#ff7b00',
         secondary: getComputedStyle(self.dom.wrapper).getPropertyValue('--rp-secondary').trim() || '#07cbf2'
       };
-      fn(ctx, w, h, data, colors);
+      fn(ctx, w, h, data, colors, !self.state.playing);
 
-      self.dom.vizNote.textContent = self.simulatedViz ? 'visual mode: simulated (stream CORS not enabled)' : '';
+      self.dom.vizNote.textContent = (self.state.playing && self.simulatedViz) ? 'visual mode: simulated (stream CORS not enabled)' : '';
 
       self._rafId = requestAnimationFrame(frame);
     }

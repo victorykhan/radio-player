@@ -17,7 +17,7 @@
 <body>
 <div class="rp-page">
   <h1>RadioPlayer — Phase 1 demo</h1>
-  <p>Embedded widget, live against VAWAM Radio's stream + public API. Source: <a href="https://github.com/victorykhan/radio-player">github.com/victorykhan/radio-player</a></p>
+  <p>Embedded widget, live against VAWAM Radio's HLS stream (hls/master.m3u8 only) + public API. Source: <a href="https://github.com/victorykhan/radio-player">github.com/victorykhan/radio-player</a></p>
   <div id="radio-player"></div>
 </div>
 
@@ -25,7 +25,6 @@
 <script>
   RadioPlayer.init({
     stationId: "vawam-radio",
-    streamUrl: "https://play.vawam.ca/stream.mp3",
     hlsUrl: "https://play.vawam.ca/hls/master.m3u8",
     apiBase: "https://play.vawam.ca",
     theme: "dark",

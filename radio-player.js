@@ -3,13 +3,13 @@
  * -----------------------------------------------------------------------
  * Single-file, framework-free, CMS-agnostic embed widget.
  *
- * Usage:
+ * Usage (HLS-only — recommended when a master playlist with multiple
+ * renditions is available, since it unlocks the quality selector):
  *   <script src="radio-player.js"></script>
  *   <div id="radio-player"></div>
  *   <script>
  *     RadioPlayer.init({
  *       stationId: "vawam-radio",
- *       streamUrl: "https://play.vawam.ca/stream.mp3",
  *       hlsUrl: "https://play.vawam.ca/hls/master.m3u8",
  *       apiBase: "https://play.vawam.ca",
  *       theme: "dark",
@@ -17,17 +17,19 @@
  *     });
  *   </script>
  *
+ * streamUrl (direct MP3/Icecast) is optional — provide it only if you want
+ * a fallback for browsers/situations where HLS can't be used.
+ *
  * Notes on scope (Phase 1):
  *   - No ad-server integration, admin panel, or analytics backend yet.
  *   - Metadata comes from the station's real public API
  *     (/api/public/now-playing, /api/public/history, /api/public/schedule,
  *     /api/settings/public) — all confirmed CORS-open (Access-Control-Allow-Origin: *).
- *   - The audio *stream* endpoints (stream.mp3 / hls/master.m3u8) send
- *     Access-Control-Allow-Origin scoped to this page's origin. The widget
- *     detects CORS availability at runtime: playback always works via plain
- *     <audio>, but real FFT-based visualizers and HLS-in-non-Safari-browsers
- *     require it. No code change is needed if that ever changes — detection
- *     re-runs on every load.
+ *   - The audio *stream* endpoints send Access-Control-Allow-Origin scoped to
+ *     this page's origin. The widget detects CORS availability at runtime:
+ *     playback always works via plain <audio>, but real FFT-based
+ *     visualizers and the HLS quality selector require it. No code change
+ *     is needed if that ever changes — detection re-runs on every load.
  */
 (function (global) {
   'use strict';
@@ -196,6 +198,8 @@
     + '.rp-volume input[type=range]{flex:1;accent-color:var(--rp-primary);}'
     + '.rp-select{background:var(--rp-bg-alt);color:var(--rp-text);border:1px solid rgba(127,127,127,.3);border-radius:8px;'
     + 'font-size:11px;padding:5px 6px;}'
+    + '.rp-quality-group{display:flex;align-items:center;gap:5px;}'
+    + '.rp-quality-label{font-size:10px;color:var(--rp-muted);text-transform:uppercase;letter-spacing:.03em;}'
     + '.rp-icon-btn{background:var(--rp-bg-alt);border:1px solid rgba(127,127,127,.3);color:var(--rp-text);border-radius:8px;'
     + 'font-size:12px;padding:5px 8px;cursor:pointer;}'
     + '.rp-section{border-top:1px solid rgba(127,127,127,.15);}'
@@ -458,19 +462,22 @@
     d.eqSelect.value = this.state.eqPreset;
     d.eqSelect.addEventListener('change', function () { self.setEQPreset(this.value); });
 
-    // Stream quality (populated once hls.js parses the master playlist;
-    // stays hidden for plain MP3 and for native-Safari HLS, where the
-    // browser's own engine handles renditions with no JS-facing API).
+    // Stream quality — populated once hls.js parses the master playlist
+    // with its real renditions (Auto + one entry per level). Stays hidden
+    // for plain MP3 and for native-Safari HLS, where the browser's own
+    // engine handles renditions internally with no JS-facing API.
     d.qualitySelect = el('select', { class: 'rp-select' });
-    d.qualitySelect.style.display = 'none';
     var autoOpt = el('option', { value: '-1' });
     autoOpt.textContent = 'Auto';
     d.qualitySelect.appendChild(autoOpt);
     d.qualitySelect.addEventListener('change', function () { self.setQualityLevel(parseInt(this.value, 10)); });
+    d.qualityLabel = el('span', { class: 'rp-quality-label' }, [document.createTextNode('Quality')]);
+    d.qualityGroup = el('div', { class: 'rp-quality-group' }, [d.qualityLabel, d.qualitySelect]);
+    d.qualityGroup.style.display = 'none';
 
     d.formatLabel = el('span', { class: 'rp-format-label' }, [document.createTextNode('')]);
 
-    d.controls = el('div', { class: 'rp-controls' }, [d.playBtn, d.volume, d.vizSelect, d.eqSelect, d.qualitySelect, d.formatLabel]);
+    d.controls = el('div', { class: 'rp-controls' }, [d.playBtn, d.volume, d.vizSelect, d.eqSelect, d.qualityGroup, d.formatLabel]);
 
     // Up next
     d.upNextBody = el('div', { class: 'rp-section-body' }, [el('div', { class: 'rp-empty' }, [document.createTextNode('Queue is empty')])]);
@@ -661,16 +668,18 @@
         self._connectAudioGraph();
         self._playSafely();
         self._setFormatLabel('HLS · native (Auto)');
-        if (self.dom.qualitySelect) self.dom.qualitySelect.style.display = 'none';
+        self._hideQualityGroup();
         return;
       }
-      if (useCors && cfg.hlsUrl && global.Hls) {
+      if (cfg.hlsUrl && global.Hls && global.Hls.isSupported()) {
         self._attachHlsJs();
         return;
       }
-      if (useCors && cfg.hlsUrl && !global.Hls) {
-        loadScript(cfg.hlsJsUrl).then(function () { self._attachHlsJs(); })
-          .catch(function () { self._useMp3(); });
+      if (cfg.hlsUrl && (!global.Hls)) {
+        loadScript(cfg.hlsJsUrl).then(function () {
+          if (global.Hls && global.Hls.isSupported()) self._attachHlsJs();
+          else self._useMp3();
+        }).catch(function () { self._useMp3(); });
         return;
       }
       self._useMp3();
@@ -689,7 +698,15 @@
     try {
       this.hls = new global.Hls({ liveDurationInfinity: true });
       this.hls.on(global.Hls.Events.ERROR, function (event, data) {
-        if (data && data.fatal) self._scheduleReconnect('hls.js fatal error: ' + data.type);
+        if (data && data.fatal) {
+          // If HLS itself can't recover and we have an MP3 fallback
+          // configured, fall back to it instead of retrying HLS forever.
+          if (self.cfg.streamUrl) {
+            self._useMp3();
+          } else {
+            self._scheduleReconnect('hls.js fatal error: ' + data.type);
+          }
+        }
       });
       this.hls.on(global.Hls.Events.MANIFEST_PARSED, function (event, data) {
         self._populateQualityLevels(data.levels);
@@ -706,9 +723,10 @@
     }
   };
 
-  // Populate the quality dropdown from hls.js's parsed renditions. Levels
-  // are labeled High/Medium/Low by descending bitrate (falls back to
-  // "Level N" if there are more than 3 renditions).
+  // Populate the quality dropdown from hls.js's parsed renditions — every
+  // rendition in the master playlist gets a real entry (not just "Auto"),
+  // labeled High/Medium/Low by descending bitrate (falls back to "Level N"
+  // if there are more than 3 renditions).
   RadioPlayerInstance.prototype._populateQualityLevels = function (levels) {
     var sel = this.dom.qualitySelect;
     if (!sel || !levels || !levels.length) return;
@@ -724,8 +742,12 @@
         sel.appendChild(opt);
       });
     sel.value = '-1';
-    sel.style.display = '';
+    if (this.dom.qualityGroup) this.dom.qualityGroup.style.display = '';
     this._setFormatLabel('HLS · Auto');
+  };
+
+  RadioPlayerInstance.prototype._hideQualityGroup = function () {
+    if (this.dom.qualityGroup) this.dom.qualityGroup.style.display = 'none';
   };
 
   RadioPlayerInstance.prototype._onLevelSwitched = function (levelIndex) {
@@ -748,17 +770,27 @@
   };
 
   RadioPlayerInstance.prototype._useMp3 = function () {
+    if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
+    this._hideQualityGroup();
+    if (!this.cfg.streamUrl) {
+      // No MP3 fallback configured (HLS-only setup) and HLS itself couldn't
+      // be used — surface this clearly instead of looping retries against
+      // an empty src.
+      this._setFormatLabel('Unavailable — no playable source');
+      this.dom.title.textContent = 'Playback unavailable';
+      this.dom.artist.textContent = 'HLS could not be loaded and no fallback stream is configured.';
+      console.warn('[RadioPlayer] No streamUrl configured and HLS is unusable in this browser/session.');
+      return;
+    }
     // Plain (non-CORS) playback: always works even when the stream lacks
     // Access-Control-Allow-Origin. Real analyser data will not be available
     // in this mode — the visualizer falls back to simulated motion.
-    if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
     this.audio.crossOrigin = null;
     this.usingCors = false;
     this.audio.src = this.cfg.streamUrl;
     this._connectAudioGraph();
     this._playSafely();
     this._setFormatLabel('MP3 · direct stream');
-    if (this.dom.qualitySelect) this.dom.qualitySelect.style.display = 'none';
   };
 
   RadioPlayerInstance.prototype._playSafely = function () {

@@ -1,11 +1,1612 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VAWAM Radio</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <title>VAWAM Radio — Live Stream</title>
+  <meta name="description" content="Listen to VAWAM Radio live. Tune in now for non-stop music streaming.">
+  <meta property="og:title" content="VAWAM Radio — Live Stream">
+  <meta property="og:description" content="Listen live to VAWAM Radio — non-stop music, jingles and more.">
+  <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #00f0ff;
+      --primary-glow: rgba(0, 240, 255, 0.35);
+      --bg: #090d1a;
+      --bg2: #0d1424;
+      --glass: rgba(255,255,255,0.04);
+      --glass-border: rgba(255,255,255,0.09);
+      --text: #f0f4ff;
+      --muted: rgba(240,244,255,0.45);
+    }
+
+    html, body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    /* ─── Animated Background ──────────────────────────────── */
+    .bg-scene {
+      position: fixed; inset: 0; z-index: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(0,80,120,0.35) 0%, transparent 70%),
+                  radial-gradient(ellipse 60% 40% at 80% 80%, rgba(80,0,120,0.3) 0%, transparent 60%),
+                  var(--bg);
+    }
+    .bg-scene::after {
+      content: '';
+      position: absolute; inset: 0;
+      background-image: radial-gradient(circle, rgba(0,240,255,0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      animation: gridPulse 8s ease-in-out infinite;
+    }
+    @keyframes gridPulse {
+      0%,100% { opacity: 0.4; } 50% { opacity: 0.9; }
+    }
+
+    /* ─── Layout ───────────────────────────────────────────── */
+    .stage {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      gap: 32px;
+    }
+
+    /* ─── Station Brand ────────────────────────────────────── */
+    .station-brand {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      animation: fadeSlideDown 0.6s ease;
+    }
+    .station-brand .station-logo {
+      width: 64px; height: 64px; border-radius: 16px;
+      object-fit: contain;
+      box-shadow: 0 0 30px var(--primary-glow);
+    }
+    .station-brand h1 {
+      font-size: clamp(18px, 4vw, 28px);
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #ffffff, var(--primary));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .live-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+      text-transform: uppercase;
+      background: rgba(255,60,60,0.15);
+      border: 1px solid rgba(255,60,60,0.4);
+      color: #ff5c5c;
+      padding: 4px 10px; border-radius: 20px;
+    }
+    .live-badge .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #ff3c3c;
+      animation: blink 1.2s step-start infinite;
+    }
+    @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+
+    /* ─── Main Player Card ─────────────────────────────────── */
+    .player-card {
+      width: 100%; max-width: 560px;
+      background: var(--glass);
+      backdrop-filter: blur(24px) saturate(1.4);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 32px;
+      animation: fadeSlideUp 0.7s ease;
+      box-shadow: 0 0 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+
+    /* ─── Track Info Row ───────────────────────────────────── */
+    .track-row {
+      display: flex; gap: 20px; align-items: center;
+      margin-bottom: 28px;
+    }
+    .cover-wrap {
+      position: relative; flex-shrink: 0;
+    }
+    .cover-art {
+      width: 110px; height: 110px; border-radius: 12px;
+      object-fit: cover;
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      transition: transform 0.4s ease;
+    }
+    .cover-art.spinning {
+      animation: vinylSpin 8s linear infinite;
+    }
+    @keyframes vinylSpin {
+      from { transform: rotate(0deg); } to { transform: rotate(360deg); }
+    }
+    .cover-wrap .eq-dot {
+      position: absolute; bottom: 6px; right: 6px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 10px var(--primary);
+      animation: blink 1s ease-in-out infinite;
+    }
+    .track-meta {
+      flex: 1; min-width: 0;
+    }
+    .track-meta .track-type {
+      font-size: 10px; font-weight: 600; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--primary);
+      margin-bottom: 6px;
+    }
+    .track-meta h2 {
+      font-size: clamp(16px, 3.5vw, 22px);
+      font-weight: 700;
+      line-height: 1.2;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .track-meta .artist {
+      font-size: 14px; color: var(--muted); font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .track-meta .up-next-label {
+      margin-top: 12px;
+      font-size: 11px; color: var(--muted);
+    }
+    .track-meta .up-next-title {
+      font-size: 12px; font-weight: 600;
+      color: rgba(240,244,255,0.75);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* ─── Progress Bar ─────────────────────────────────────── */
+    .progress-wrap {
+      margin-bottom: 20px;
+    }
+    .progress-track {
+      width: 100%; height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px; overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), #a78fff);
+      border-radius: 2px;
+      transition: width 1s linear;
+      box-shadow: 0 0 8px var(--primary-glow);
+    }
+    .progress-times {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--muted);
+    }
+
+    /* ─── Visualizer ───────────────────────────────────────── */
+    .visualizer-wrap {
+      height: 56px;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 20px;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--glass-border);
+      position: relative;
+    }
+    #vis-canvas {
+      width: 100%; height: 100%;
+      display: block;
+    }
+    .vis-overlay {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--muted);
+      pointer-events: none;
+    }
+
+    /* ─── Controls ─────────────────────────────────────────── */
+    .controls-row {
+      display: flex; flex-direction: column; gap: 12px; width: 100%;
+    }
+    .playback-controls-wrap {
+      display: flex; align-items: center; gap: 16px; width: 100%;
+    }
+    .playback-controls {
+      display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    }
+    .controls-sub-row {
+      display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 4px;
+    }
+    .control-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .play-btn {
+      background: linear-gradient(135deg, var(--primary), #7b5cff);
+      color: #000;
+      box-shadow: 0 0 20px var(--primary-glow), 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .play-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 28px var(--primary-glow), 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .play-btn:active { transform: scale(0.96); }
+    .pause-btn {
+      background: linear-gradient(135deg, #ff9f43, #ff5252);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(255, 159, 67, 0.35), 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .pause-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 28px rgba(255, 159, 67, 0.5), 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .pause-btn:active { transform: scale(0.96); }
+    .stop-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text);
+    }
+    .stop-btn:hover {
+      transform: scale(1.08);
+      background: rgba(255, 255, 255, 0.16);
+      box-shadow: 0 0 16px rgba(255, 255, 255, 0.1), 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .stop-btn:active { transform: scale(0.96); }
+    .control-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+    .play-btn svg {
+      fill: #000;
+    }
+
+    .volume-group {
+      display: flex; align-items: center; gap: 8px; flex: 1;
+    }
+    .volume-icon { font-size: 15px; color: var(--muted); flex-shrink: 0; }
+    input[type="range"].vol-slider {
+      flex: 1; height: 4px;
+      -webkit-appearance: none; appearance: none;
+      background: rgba(255,255,255,0.1);
+      border-radius: 2px; cursor: pointer; outline: none;
+    }
+    input[type="range"].vol-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 8px var(--primary-glow);
+      cursor: pointer;
+    }
+
+    .listener-count {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted); flex-shrink: 0;
+    }
+    .listener-count .ear { font-size: 14px; }
+
+    /* ─── Stream URL Box ───────────────────────────────────── */
+    .stream-url-box {
+      width: 100%; max-width: 560px;
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 16px 20px;
+      animation: fadeSlideUp 0.9s ease;
+    }
+    .stream-url-box .label {
+      font-size: 10px; font-weight: 600; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .url-copy-row {
+      display: flex; gap: 10px; align-items: center;
+    }
+    .url-input {
+      flex: 1; background: rgba(0,0,0,0.3);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px; padding: 8px 12px;
+      font-family: 'Inter', monospace; font-size: 12px; color: var(--text);
+      cursor: text; outline: none;
+    }
+    .btn-copy {
+      padding: 8px 14px; border-radius: 8px;
+      border: 1px solid var(--glass-border);
+      background: rgba(255,255,255,0.05);
+      color: var(--primary); font-size: 12px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .btn-copy:hover { background: rgba(0,240,255,0.08); }
+
+    /* ─── Back link ────────────────────────────────────────── */
+    .back-link {
+      font-size: 12px; color: var(--muted); text-decoration: none;
+      transition: color 0.2s;
+      animation: fadeSlideUp 1s ease;
+    }
+    .back-link:hover { color: var(--primary); }
+
+    /* ─── Animations ───────────────────────────────────────── */
+    @keyframes fadeSlideDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── Scrolling marquee for long titles ────────────────── */
+    .marquee-wrap { overflow: hidden; }
+    .marquee-inner {
+      display: inline-block;
+      white-space: nowrap;
+      animation: none;
+    }
+    .marquee-inner.overflow {
+      animation: marquee 12s linear infinite;
+    }
+    @keyframes marquee {
+      0%   { transform: translateX(0); }
+      40%  { transform: translateX(calc(-100% + 200px)); }
+      60%  { transform: translateX(calc(-100% + 200px)); }
+      100% { transform: translateX(0); }
+    }
+
+    /* ─── Offline state ────────────────────────────────────── */
+    .offline-msg {
+      font-size: 13px; color: var(--muted); text-align: center;
+      padding: 8px 0; display: none;
+    }
+    body.offline .offline-msg { display: block; }
+
+    /* ─── History & Queue Grid ─────────────────────────────── */
+    .history-queue-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      width: 100%;
+      max-width: 560px;
+      animation: fadeSlideUp 0.8s ease;
+      margin-top: 10px;
+      margin-bottom: 20px;
+    }
+    .list-card {
+      padding: 22px;
+      border-radius: 18px;
+    }
+    .list-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .track-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .track-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.015);
+      border: 1px solid rgba(255,255,255,0.03);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .track-item:hover {
+      background: rgba(255,255,255,0.035);
+      transform: translateY(-1px);
+    }
+    .track-item-cover {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .track-item-meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .track-item-title {
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+    .track-item-artist {
+      color: var(--muted);
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .track-item-empty {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      padding: 16px 0;
+    }
+    .track-item-time {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 768px) {
+      .history-queue-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .stage {
+        padding: 10px;
+        width: 100%;
+      }
+      .player-card {
+        padding: 16px 14px;
+        border-radius: 14px;
+      }
+      .track-row {
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .cover-art {
+        width: 72px;
+        height: 72px;
+      }
+      .track-meta h2 {
+        font-size: 15px;
+      }
+      .track-meta .artist {
+        font-size: 12px;
+      }
+      .track-meta .up-next-label {
+        margin-top: 8px;
+        font-size: 10px;
+      }
+      .track-meta .up-next-title {
+        font-size: 11px;
+      }
+      .playback-controls-wrap {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .playback-controls {
+        justify-content: center;
+      }
+      .volume-group {
+        width: 100%;
+        padding: 0 4px;
+      }
+      .controls-sub-row {
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .quality-group {
+        margin-right: 0;
+        width: 100%;
+        justify-content: center;
+      }
+      .listener-count {
+        margin-left: 0;
+        justify-content: center;
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 340px) {
+      .player-card {
+        padding: 12px 10px;
+      }
+      .cover-art {
+        width: 60px;
+        height: 60px;
+      }
+      .track-meta h2 {
+        font-size: 13px;
+      }
+      .track-meta .artist {
+        font-size: 11px;
+      }
+      .control-btn {
+        width: 38px;
+        height: 38px;
+      }
+      .control-btn svg {
+        width: 15px;
+        height: 15px;
+      }
+    }
+  </style>
 </head>
 <body>
-<iframe src="https://play.vawam.ca/stream.html" width="100%" height="650" style="border: none; border-radius: 16px; background: transparent; overflow: hidden;" allow="autoplay"></iframe>
+  <div class="bg-scene"></div>
+
+  <div class="stage">
+    <!-- Station Branding -->
+    <div class="station-brand">
+      <img id="stream-logo" class="station-logo" src="https://play.vawam.ca/images/default-logo.svg" alt="Station Logo" onerror="this.src='https://play.vawam.ca/images/default-logo.svg'">
+      <h1 id="stream-station-name">VAWAM Radio</h1>
+      <span class="live-badge"><span class="dot"></span> LIVE</span>
+    </div>
+
+    <!-- Main Player Card -->
+    <div class="player-card">
+      <!-- Track Info -->
+      <div class="track-row">
+        <div class="cover-wrap">
+          <img id="stream-cover" class="cover-art spinning" src="https://play.vawam.ca/covers/default-vinyl.svg" alt="Cover Art" onerror="this.src='https://play.vawam.ca/covers/default-vinyl.svg'">
+          <span class="eq-dot" id="stream-eq-dot"></span>
+        </div>
+        <div class="track-meta">
+          <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap;">
+            <div class="track-type" id="stream-track-type" style="margin-bottom: 0;">🎵 NOW PLAYING</div>
+            <div id="stream-source-badge" style="display: none; font-size: 10px; font-weight: 700; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 4px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px;">STANDBY</div>
+          </div>
+          <div class="marquee-wrap">
+            <h2 class="marquee-inner" id="stream-title">Connecting...</h2>
+          </div>
+          <div class="artist" id="stream-artist">Stand by</div>
+          <div class="up-next-label">Up Next →</div>
+          <div class="up-next-title" id="stream-up-next">—</div>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap">
+        <div class="progress-track">
+          <div class="progress-fill" id="stream-progress" style="width:0%"></div>
+        </div>
+        <div class="progress-times">
+          <span id="stream-elapsed">0:00</span>
+          <span id="stream-duration">—</span>
+        </div>
+      </div>
+
+      <!-- Visualizer Style Picker -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; margin-top: 15px; width: 100%; max-width: 400px; margin-left: auto; margin-right: auto; padding: 0 4px;">
+        <span style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.5px;">Visualizer Mode</span>
+        <select id="visualizer-style-select" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text-main); font-size: 11px; border-radius: 4px; padding: 4px 10px; cursor: pointer; outline: none; font-weight: 600; font-family: inherit;">
+          <option value="bars">📊 Classic Neon Bars</option>
+          <option value="wave">〰️ Digital Glow Wave</option>
+          <option value="circular">⭕ Radial Aura Spectrum</option>
+          <option value="vu">🚥 Retro VU Blocks</option>
+          <option value="blob">🔮 Orbital Pulsing Blob</option>
+        </select>
+      </div>
+
+      <!-- Visualizer Canvas -->
+      <div class="visualizer-wrap">
+        <canvas id="vis-canvas"></canvas>
+        <div class="vis-overlay" id="vis-hint">Press play to enable visualizer</div>
+      </div>
+
+      <!-- Controls -->
+      <div class="controls-row">
+        <div class="playback-controls-wrap">
+          <div class="playback-controls">
+            <button class="control-btn play-btn" id="btn-stream-play" title="Play">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="control-btn pause-btn" id="btn-stream-pause" title="Pause" style="display: none;">
+              <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            </button>
+            <button class="control-btn stop-btn" id="btn-stream-stop" title="Stop">
+              <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+            </button>
+          </div>
+          <div class="volume-group">
+            <span class="volume-icon">🔊</span>
+            <input type="range" class="vol-slider" id="stream-volume" min="0" max="1" step="0.02" value="0.85">
+          </div>
+        </div>
+
+        <div class="controls-sub-row">
+          <!-- Quality Selector -->
+          <div class="quality-group" id="stream-quality-group" style="display: none; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 4px 10px 4px 8px; font-size: 11px;">
+            <span style="font-size: 13px; color: var(--muted); cursor: default; display: flex; align-items: center;">⚙️</span>
+            <select id="stream-quality-select" style="background: transparent; border: none; color: var(--text); outline: none; cursor: pointer; font-size: 11px; font-weight: 600; padding-right: 4px;">
+              <option value="-1" style="background: var(--bg2); color: var(--text);">Auto</option>
+            </select>
+          </div>
+          <div class="listener-count">
+            <span class="ear">🎧</span>
+            <span id="stream-listeners">—</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="offline-msg" id="stream-offline">Stream is currently offline. Please check back soon.</p>
+    </div>
+
+    <!-- Play History and Upcoming Queue Grid -->
+    <div class="history-queue-grid">
+      <!-- Past 5 Tracks -->
+      <div class="glass-card list-card">
+        <h4 class="list-title">🕒 Recently Played</h4>
+        <ul id="past-tracks-list" class="track-list">
+          <li class="track-item-empty">No recently played tracks</li>
+        </ul>
+      </div>
+
+      <!-- Next 5 Tracks -->
+      <div class="glass-card list-card">
+        <h4 class="list-title">⏭️ Coming Up Next</h4>
+        <ul id="next-tracks-list" class="track-list">
+          <li class="track-item-empty">Queue is empty</li>
+        </ul>
+      </div>
+    </div>
+
+   
+
+ 
+  </div>
+
+  <script>
+  (function() {
+    const STREAM_URL = 'https://play.vawam.ca/stream.mp3';
+    const NOW_PLAYING_URL = 'https://play.vawam.ca/api/public/now-playing';
+
+    // DOM refs
+    const audio       = document.createElement('audio');
+    audio.crossOrigin = "anonymous";
+    audio.preload     = "none";
+    const btnPlay     = document.getElementById('btn-stream-play');
+    const btnPause    = document.getElementById('btn-stream-pause');
+    const btnStop     = document.getElementById('btn-stream-stop');
+    const volSlider   = document.getElementById('stream-volume');
+    const cover       = document.getElementById('stream-cover');
+    const titleEl     = document.getElementById('stream-title');
+    const artistEl    = document.getElementById('stream-artist');
+    const upNextEl    = document.getElementById('stream-up-next');
+    const progressEl  = document.getElementById('stream-progress');
+    const elapsedEl   = document.getElementById('stream-elapsed');
+    const durationEl  = document.getElementById('stream-duration');
+    const listenersEl = document.getElementById('stream-listeners');
+    const eqDot       = document.getElementById('stream-eq-dot');
+    const trackType   = document.getElementById('stream-track-type');
+    const sourceBadge = document.getElementById('stream-source-badge');
+    const visHint     = document.getElementById('vis-hint');
+    const offlineMsg  = document.getElementById('stream-offline');
+    const btnCopy     = document.getElementById('btn-copy-url');
+    const pastList    = document.getElementById('past-tracks-list');
+    const nextList    = document.getElementById('next-tracks-list');
+
+    const canvas      = document.getElementById('vis-canvas');
+    const ctx         = canvas.getContext('2d');
+
+    let isPlaying = false;
+    let hls = null;
+    let audioCtx, analyser, source, animFrameId;
+    let nowPlayingData = null;
+
+    function updateButtonStates(playing) {
+      if (playing) {
+        btnPlay.style.display = 'none';
+        btnPause.style.display = 'flex';
+      } else {
+        btnPlay.style.display = 'flex';
+        btnPause.style.display = 'none';
+      }
+    }
+
+    // ── Public Configurations & Volume ──────────────────────────
+    let embedSettings = {
+      autoplay: false,
+      defaultVolume: 0.25,
+      showDuration: true,
+      primaryColor: '#00f0ff',
+      secondaryColor: '#7000ff',
+      showUpcoming: true,
+      showRecentlyPlayed: true,
+      upcomingCount: 3,
+      recentlyPlayedCount: 5,
+      defaultAdCoverUrl: 'https://play.vawam.ca/covers/default-vinyl.svg'
+    };
+
+    function loadClientConfig() {
+      fetch('/api/settings/public')
+        .then(res => res.json())
+        .then(data => {
+          if (data.embedSettings) {
+            embedSettings = { ...embedSettings, ...data.embedSettings };
+            applyClientConfig();
+          }
+        })
+        .catch(err => console.warn('Could not load public settings:', err));
+    }
+
+    function applyClientConfig() {
+      // Apply theme custom colors
+      document.documentElement.style.setProperty('--primary-color', embedSettings.primaryColor);
+      document.documentElement.style.setProperty('--secondary-color', embedSettings.secondaryColor);
+      
+      const primaryGlow = hexToRgbA(embedSettings.primaryColor, 0.35);
+      const secondaryGlow = hexToRgbA(embedSettings.secondaryColor, 0.35);
+      document.documentElement.style.setProperty('--primary-glow', primaryGlow);
+      document.documentElement.style.setProperty('--secondary-glow', secondaryGlow);
+
+      // Volume setup
+      const localVol = localStorage.getItem('playone_volume');
+      if (localVol === null) {
+        audio.volume = embedSettings.defaultVolume;
+        volSlider.value = embedSettings.defaultVolume;
+      } else {
+        audio.volume = parseFloat(localVol);
+        volSlider.value = parseFloat(localVol);
+      }
+
+      // Show/hide duration
+      const progressWrap = document.querySelector('.progress-wrap');
+      if (progressWrap) {
+        progressWrap.style.display = embedSettings.showDuration ? 'block' : 'none';
+      }
+
+      // Show/hide lists in history-queue-grid
+      const listCards = document.querySelectorAll('.history-queue-grid .list-card');
+      if (listCards.length >= 2) {
+        listCards[0].style.display = embedSettings.showRecentlyPlayed ? 'block' : 'none';
+        listCards[1].style.display = embedSettings.showUpcoming ? 'block' : 'none';
+      }
+      
+      const grid = document.querySelector('.history-queue-grid');
+      if (grid) {
+        if (!embedSettings.showUpcoming && !embedSettings.showRecentlyPlayed) {
+          grid.style.display = 'none';
+        } else if (!embedSettings.showUpcoming || !embedSettings.showRecentlyPlayed) {
+          grid.style.gridTemplateColumns = '1fr';
+          grid.style.display = 'grid';
+        } else {
+          grid.style.gridTemplateColumns = '1fr 1fr';
+          grid.style.display = 'grid';
+        }
+      }
+
+      // Autoplay
+      if (embedSettings.autoplay && !isPlaying) {
+        setTimeout(() => {
+          btnPlay.click();
+        }, 1200);
+      }
+    }
+
+    // Load initial config
+    loadClientConfig();
+
+    volSlider.addEventListener('input', () => { 
+      audio.volume = parseFloat(volSlider.value); 
+      localStorage.setItem('playone_volume', volSlider.value);
+    });
+
+    // Visualizer local storage persistence
+    const styleSelect = document.getElementById('visualizer-style-select');
+    if (styleSelect) {
+      const storedStyle = localStorage.getItem('playone_visualizer_style');
+      if (storedStyle) {
+        styleSelect.value = storedStyle;
+      }
+      styleSelect.addEventListener('change', (e) => {
+        localStorage.setItem('playone_visualizer_style', e.target.value);
+      });
+    }
+
+    // ── Web Audio Visualizer ───────────────────────────────────
+    function initAudioContext() {
+      if (audioCtx) return;
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128;
+        analyser.smoothingTimeConstant = 0.8;
+        source = audioCtx.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(audioCtx.destination);
+      } catch(e) { console.warn('Web Audio API not available:', e); }
+    }
+
+    function resizeCanvas() {
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width * devicePixelRatio;
+      canvas.height = rect.height * devicePixelRatio;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function hexToRgbA(hex, alpha = 1) {
+      let c;
+      if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+        c = hex.substring(1).split('');
+        if (c.length === 3) {
+          c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+        }
+        c = '0x' + c.join('');
+        return `rgba(${[(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',')},${alpha})`;
+      }
+      return `rgba(0,240,255,${alpha})`;
+    }
+
+    function interpolateColors(color1, color2, factor) {
+      if (!color1.startsWith('#')) color1 = '#00f0ff';
+      if (!color2.startsWith('#')) color2 = '#7000ff';
+      if (color1.length === 4) {
+        color1 = '#' + color1[1] + color1[1] + color1[2] + color1[2] + color1[3] + color1[3];
+      }
+      if (color2.length === 4) {
+        color2 = '#' + color2[1] + color2[1] + color2[2] + color2[2] + color2[3] + color2[3];
+      }
+      const r1 = parseInt(color1.substring(1,3), 16);
+      const g1 = parseInt(color1.substring(3,5), 16);
+      const b1 = parseInt(color1.substring(5,7), 16);
+      
+      const r2 = parseInt(color2.substring(1,3), 16);
+      const g2 = parseInt(color2.substring(3,5), 16);
+      const b2 = parseInt(color2.substring(5,7), 16);
+      
+      const r = Math.round(r1 + factor * (r2 - r1));
+      const g = Math.round(g1 + factor * (g2 - g1));
+      const b = Math.round(b1 + factor * (b2 - b1));
+      
+      return { r, g, b };
+    }
+
+    // Color gradient per bar
+    function barColor(index, total, alpha) {
+      const primaryColor = (getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#00f0ff');
+      const secondaryColor = (getComputedStyle(document.documentElement).getPropertyValue('--secondary-color').trim() || '#7000ff');
+      try {
+        const factor = index / Math.max(1, total - 1);
+        const { r, g, b } = interpolateColors(primaryColor, secondaryColor, factor);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      } catch (e) {
+        return hexToRgbA(primaryColor, alpha);
+      }
+    }
+
+    function drawVisualizer() {
+      animFrameId = requestAnimationFrame(drawVisualizer);
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      if (!analyser) return;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArr = new Uint8Array(bufferLength);
+      
+      const style = document.getElementById('visualizer-style-select')?.value || 'bars';
+      const primaryColor = (getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#00f0ff');
+      const secondaryColor = (getComputedStyle(document.documentElement).getPropertyValue('--secondary-color').trim() || '#7000ff');
+
+      if (style === 'wave') {
+        analyser.getByteTimeDomainData(dataArr);
+        ctx.lineWidth = 3 * devicePixelRatio;
+        const grad = ctx.createLinearGradient(0, 0, W, 0);
+        grad.addColorStop(0, primaryColor);
+        grad.addColorStop(1, secondaryColor);
+        ctx.strokeStyle = grad;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = primaryColor;
+        ctx.beginPath();
+        const sliceWidth = W * 1.0 / bufferLength;
+        let x = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const v = dataArr[i] / 128.0;
+          const y = v * H / 2;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        ctx.lineTo(W, H / 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      } else if (style === 'circular') {
+        analyser.getByteFrequencyData(dataArr);
+        const centerX = W / 2;
+        const centerY = H / 2;
+        const baseRadius = Math.min(W, H) * 0.22;
+        const barCount = Math.min(bufferLength, 60);
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = primaryColor;
+        for (let i = 0; i < barCount; i++) {
+          const val = dataArr[i] / 255;
+          const barH = val * Math.min(W, H) * 0.25;
+          const angle = (i / barCount) * Math.PI * 2;
+          const xStart = centerX + Math.cos(angle) * baseRadius;
+          const yStart = centerY + Math.sin(angle) * baseRadius;
+          const xEnd = centerX + Math.cos(angle) * (baseRadius + barH);
+          const yEnd = centerY + Math.sin(angle) * (baseRadius + barH);
+          
+          ctx.strokeStyle = barColor(i, barCount, 0.85);
+          ctx.lineWidth = 3 * devicePixelRatio;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(xStart, yStart);
+          ctx.lineTo(xEnd, yEnd);
+          ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+      } else if (style === 'vu') {
+        analyser.getByteFrequencyData(dataArr);
+        const barCount = 16;
+        const blockCount = 10;
+        const gapX = 4 * devicePixelRatio;
+        const gapY = 2 * devicePixelRatio;
+        const barW = (W - (barCount - 1) * gapX) / barCount;
+        const blockH = (H - (blockCount - 1) * gapY) / blockCount;
+        for (let i = 0; i < barCount; i++) {
+          const val = dataArr[i] / 255;
+          const activeBlocks = Math.round(val * blockCount);
+          const x = i * (barW + gapX);
+          for (let j = 0; j < blockCount; j++) {
+            const blockIndex = blockCount - 1 - j;
+            const y = j * (blockH + gapY);
+            let opacity = 0.08;
+            if (blockIndex < activeBlocks) opacity = 0.9;
+            let blockColor = `rgba(0, 255, 102, ${opacity})`;
+            if (blockIndex >= 6 && blockIndex < 8) {
+              blockColor = `rgba(255, 170, 0, ${opacity})`;
+            } else if (blockIndex >= 8) {
+              blockColor = `rgba(255, 62, 62, ${opacity})`;
+            }
+            ctx.fillStyle = blockColor;
+            ctx.beginPath();
+            ctx.roundRect(x, y, barW, blockH, 1 * devicePixelRatio);
+            ctx.fill();
+          }
+        }
+      } else if (style === 'blob') {
+        analyser.getByteFrequencyData(dataArr);
+        const centerX = W / 2;
+        const centerY = H / 2;
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) sum += dataArr[i];
+        const avg = sum / bufferLength / 255;
+        const baseRadius = Math.min(W, H) * 0.2 + avg * Math.min(W, H) * 0.15;
+        
+        ctx.fillStyle = ctx.createRadialGradient(centerX, centerY, baseRadius * 0.1, centerX, centerY, baseRadius);
+        ctx.fillStyle.addColorStop(0, hexToRgbA(primaryColor, 0.8));
+        ctx.fillStyle.addColorStop(0.6, hexToRgbA(secondaryColor, 0.4));
+        ctx.fillStyle.addColorStop(1, 'transparent');
+        
+        ctx.beginPath();
+        const points = 8;
+        const t = Date.now() / 1000;
+        for (let i = 0; i < points; i++) {
+          const angle = (i / points) * Math.PI * 2;
+          const offset = Math.sin(t * 3 + i * 2) * (avg * 15 * devicePixelRatio);
+          const r = baseRadius + offset;
+          const x = centerX + Math.cos(angle) * r;
+          const y = centerY + Math.sin(angle) * r;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Default "bars"
+        analyser.getByteFrequencyData(dataArr);
+        const barCount = Math.min(bufferLength, 48);
+        const gap = 3 * devicePixelRatio;
+        const barW = (W - (barCount - 1) * gap) / barCount;
+        for (let i = 0; i < barCount; i++) {
+          const val = dataArr[i] / 255;
+          const barH = Math.max(3 * devicePixelRatio, val * H * 0.92);
+          const x = i * (barW + gap);
+          const y = H - barH;
+          const grad = ctx.createLinearGradient(0, y, 0, H);
+          grad.addColorStop(0, barColor(i, barCount, 0.9));
+          grad.addColorStop(1, barColor(i, barCount, 0.2));
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          const r = Math.min(barW / 2, 3 * devicePixelRatio);
+          ctx.roundRect(x, y, barW, barH, [r, r, 0, 0]);
+          ctx.fill();
+        }
+      }
+    }
+
+    // Fallback idle animation when paused
+    function drawIdle() {
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const barCount = 48;
+      const gap = 3 * devicePixelRatio;
+      const barW = (W - (barCount - 1) * gap) / barCount;
+      const t = Date.now() / 500;
+      for (let i = 0; i < barCount; i++) {
+        const val = (Math.sin(t + i * 0.4) * 0.5 + 0.5) * 0.25 + 0.04;
+        const barH = val * H;
+        const x = i * (barW + gap);
+        const y = H - barH;
+        ctx.fillStyle = `rgba(255,255,255,0.06)`;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW, barH, 2 * devicePixelRatio);
+        ctx.fill();
+      }
+      if (!isPlaying) requestAnimationFrame(drawIdle);
+    }
+    drawIdle();
+
+    let isPlayingAd = false;
+
+    async function playVastAd(vastUrl) {
+      try {
+        const res = await fetch(vastUrl);
+        if (!res.ok) throw new Error('VAST fetch failed');
+        const xmlText = await res.text();
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+        
+        const mediaFiles = xmlDoc.getElementsByTagName('MediaFile');
+        let audioUrl = '';
+        for (let i = 0; i < mediaFiles.length; i++) {
+          const type = mediaFiles[i].getAttribute('type') || '';
+          if (type.includes('audio') || type.includes('mpeg') || type.includes('mp3')) {
+            audioUrl = mediaFiles[i].textContent.trim();
+            break;
+          }
+        }
+        
+        if (!audioUrl && mediaFiles.length > 0) {
+          audioUrl = mediaFiles[0].textContent.trim();
+        }
+
+        if (!audioUrl) return null;
+
+        return {
+          audioUrl,
+          impressions: Array.from(xmlDoc.getElementsByTagName('Impression')).map(el => el.textContent.trim()),
+          startTrackers: Array.from(xmlDoc.getElementsByTagName('Tracking'))
+            .filter(el => el.getAttribute('event') === 'start')
+            .map(el => el.textContent.trim()),
+          completeTrackers: Array.from(xmlDoc.getElementsByTagName('Tracking'))
+            .filter(el => el.getAttribute('event') === 'complete')
+            .map(el => el.textContent.trim())
+        };
+      } catch (err) {
+        console.warn('VAST ad processing failed:', err);
+        return null;
+      }
+    }
+
+    function playFallbackMp3() {
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+      audio.src = STREAM_URL + '?_t=' + Date.now();
+      audio.play().catch(e => console.error('Play fallback error:', e));
+    }
+
+    function startLivePlayout() {
+      const hlsUrl = '/hls/master.m3u8';
+      
+      if (Hls.isSupported()) {
+        if (!hls) {
+          hls = new Hls({
+            maxMaxBufferLength: 10,
+            enableWorker: true,
+            lowLatencyMode: true
+          });
+          hls.loadSource(hlsUrl);
+          hls.attachMedia(audio);
+
+          const qualityGroup = document.getElementById('stream-quality-group');
+          const qualitySelect = document.getElementById('stream-quality-select');
+          if (qualityGroup) qualityGroup.style.display = 'flex';
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (qualitySelect) {
+              qualitySelect.innerHTML = '<option value="-1" style="background: var(--bg2); color: var(--text);">Auto</option>';
+              hls.levels.forEach((level, idx) => {
+                const name = level.name || `${Math.round(level.bitrate / 1000)}k`;
+                const friendlyName = name === 'high' ? '192k (High)' : name === 'medium' ? '128k (Medium)' : name === 'low' ? '64k (Low)' : name;
+                const opt = document.createElement('option');
+                opt.value = idx;
+                opt.textContent = friendlyName;
+                opt.style.background = 'var(--bg2)';
+                opt.style.color = 'var(--text)';
+                qualitySelect.appendChild(opt);
+              });
+              qualitySelect.value = hls.loadLevel;
+              qualitySelect.onchange = () => {
+                const val = parseInt(qualitySelect.value);
+                hls.currentLevel = val;
+              };
+            }
+          });
+
+          hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+            if (qualitySelect && hls.autoLevelEnabled) {
+              const activeIdx = data.level;
+              const level = hls.levels[activeIdx];
+              if (level) {
+                const name = level.name || `${Math.round(level.bitrate / 1000)}k`;
+                const friendlyName = name === 'high' ? '192k' : name === 'medium' ? '128k' : name === 'low' ? '64k' : name;
+                qualitySelect.options[0].textContent = `Auto (${friendlyName})`;
+              }
+            }
+          });
+        } else {
+          hls.loadSource(hlsUrl);
+        }
+        audio.play().catch(e => {
+          console.warn('HLS play failed, trying MP3:', e);
+          playFallbackMp3();
+        });
+      } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+        audio.src = hlsUrl;
+        audio.play().catch(e => {
+          console.warn('Native HLS play failed, trying MP3:', e);
+          playFallbackMp3();
+        });
+      } else {
+        playFallbackMp3();
+      }
+
+      isPlaying = true;
+      sendListenerPing(); // Send heartbeat immediately
+      updateButtonStates(true);
+      cover.classList.add('spinning');
+      visHint.style.display = 'none';
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      drawVisualizer();
+      fetchNowPlaying(); // reload metadata
+    }
+
+    // ── Play / Pause / Stop controls ───────────────────────────
+    btnPlay.addEventListener('click', async () => {
+      initAudioContext();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+
+      if (embedSettings.vastEnabled && embedSettings.vastTagUrl) {
+        btnPlay.style.display = 'none';
+        btnPause.style.display = 'none';
+        const ad = await playVastAd(embedSettings.vastTagUrl);
+        if (ad) {
+          isPlayingAd = true;
+          titleEl.textContent = 'Advertisement';
+          artistEl.textContent = 'Commercial Break';
+          cover.src = embedSettings.defaultAdCoverUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+          
+          audio.src = ad.audioUrl;
+          audio.volume = parseFloat(volSlider.value);
+          
+          ad.impressions.forEach(url => fetch(url, { mode: 'no-cors' }).catch(()=>{}));
+          ad.startTrackers.forEach(url => fetch(url, { mode: 'no-cors' }).catch(()=>{}));
+
+          audio.addEventListener('ended', onAdEnded);
+          audio.addEventListener('error', onAdError);
+
+          function onAdEnded() {
+            ad.completeTrackers.forEach(url => fetch(url, { mode: 'no-cors' }).catch(()=>{}));
+            cleanupAd();
+            startLivePlayout();
+          }
+
+          function onAdError(e) {
+            console.warn('VAST ad error, transitioning to stream:', e);
+            cleanupAd();
+            startLivePlayout();
+          }
+
+          function cleanupAd() {
+            audio.removeEventListener('ended', onAdEnded);
+            audio.removeEventListener('error', onAdError);
+            isPlayingAd = false;
+          }
+
+          audio.play()
+            .then(() => {
+              isPlaying = true;
+              updateButtonStates(true);
+              cover.classList.add('spinning');
+              visHint.style.display = 'none';
+              if (animFrameId) cancelAnimationFrame(animFrameId);
+              drawVisualizer();
+            })
+            .catch(err => {
+              console.warn('VAST ad play failed, transitioning to stream:', err);
+              cleanupAd();
+              startLivePlayout();
+            });
+          return;
+        }
+      }
+
+      startLivePlayout();
+    });
+
+    btnPause.addEventListener('click', () => {
+      audio.pause();
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+      const qualityGroup = document.getElementById('stream-quality-group');
+      if (qualityGroup) qualityGroup.style.display = 'none';
+      audio.src = '';
+      isPlaying = false;
+      updateButtonStates(false);
+      cover.classList.remove('spinning');
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      drawIdle();
+    });
+
+    btnStop.addEventListener('click', () => {
+      audio.pause();
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+      const qualityGroup = document.getElementById('stream-quality-group');
+      if (qualityGroup) qualityGroup.style.display = 'none';
+      audio.src = '';
+      isPlaying = false;
+      updateButtonStates(false);
+      cover.classList.remove('spinning');
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      drawIdle();
+      visHint.style.display = 'block';
+    });
+
+    audio.addEventListener('error', () => {
+      isPlaying = false;
+      updateButtonStates(false);
+      cover.classList.remove('spinning');
+      document.body.classList.add('offline');
+    });
+
+    // ── Copy URL ───────────────────────────────────────────────
+    btnCopy.addEventListener('click', () => {
+      navigator.clipboard.writeText(document.getElementById('stream-url-display').value)
+        .then(() => { btnCopy.textContent = '✓ Copied!'; setTimeout(() => btnCopy.textContent = 'Copy', 2000); });
+    });
+
+    // ── Format time ────────────────────────────────────────────
+    function fmtTime(s) {
+      if (!s || isNaN(s)) return '—';
+      s = Math.floor(s);
+      return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+    }
+
+    // ── Marquee overflow check ─────────────────────────────────
+    function checkMarquee(el) {
+      const parent = el.parentElement;
+      if (el.scrollWidth > parent.clientWidth + 2) {
+        el.classList.add('overflow');
+      } else {
+        el.classList.remove('overflow');
+      }
+    }
+
+    // ── Poll now-playing ───────────────────────────────────────
+    let lastTrackId = null;
+    let pendingUpdateTimeout = null;
+    let renderedTrackId = null;
+    let pendingTrackId = null;
+
+    async function fetchNowPlaying() {
+      if (isPlayingAd) return;
+      try {
+        const res = await fetch(NOW_PLAYING_URL);
+        if (!res.ok) throw new Error('offline');
+        const data = await res.json();
+        
+        document.body.classList.remove('offline');
+        offlineMsg.style.display = 'none';
+
+        // Listeners (if Icecast stats available) - update instantly
+        if (data.listeners !== undefined) {
+          listenersEl.textContent = data.listeners + ' listening';
+        } else {
+          listenersEl.textContent = '';
+        }
+
+        const np = data.now_playing;
+        if (!np) {
+          if (pendingUpdateTimeout) clearTimeout(pendingUpdateTimeout);
+          renderNowPlayingUI(data, 0);
+          renderedTrackId = null;
+          pendingTrackId = null;
+          return;
+        }
+
+        if (np.id !== renderedTrackId) {
+          if (np.id !== pendingTrackId) {
+            // New transition!
+            if (pendingUpdateTimeout) clearTimeout(pendingUpdateTimeout);
+            pendingTrackId = np.id;
+
+            let delayMs = 0;
+            if (isPlaying) {
+              const isTransitionToAd = (np.fileType === 'AD' || np.fileType === 'PROMO');
+              delayMs = isTransitionToAd ? 0 : 20000;
+            }
+
+            if (delayMs > 0) {
+              pendingUpdateTimeout = setTimeout(() => {
+                renderNowPlayingUI(data, delayMs / 1000);
+                renderedTrackId = np.id;
+                pendingUpdateTimeout = null;
+              }, delayMs);
+            } else {
+              renderNowPlayingUI(data, 0);
+              renderedTrackId = np.id;
+              pendingTrackId = null;
+            }
+          }
+        } else {
+          // Same track: update progress smoothly using appropriate delay offset
+          if (!pendingUpdateTimeout) {
+            const isAd = (np.fileType === 'AD' || np.fileType === 'PROMO');
+            renderNowPlayingUI(data, (isPlaying && !isAd) ? 20 : 0);
+          }
+        }
+
+      } catch(e) {
+        document.body.classList.add('offline');
+        offlineMsg.style.display = 'block';
+        titleEl.textContent = 'Stream Offline';
+        artistEl.textContent = '—';
+      }
+    }
+
+    async function renderNowPlayingUI(data, delaySeconds) {
+      const np = data.now_playing;
+      if (np) {
+        // Cover art
+        let newCover = np.coverArtUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+        if (np.fileType === 'AD' || np.fileType === 'PROMO') {
+          newCover = embedSettings.defaultAdCoverUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+        }
+        const absoluteNewCover = newCover.startsWith('http') ? newCover : ('https://play.vawam.ca' + newCover);
+        if (cover.src !== absoluteNewCover) {
+          cover.src = absoluteNewCover;
+          cover.onerror = () => { cover.src = 'https://play.vawam.ca/covers/default-vinyl.svg'; };
+        }
+
+        // Title & artist with marquee
+        titleEl.textContent = np.title || 'Unknown Track';
+        const displayArtist = (np.artist === 'Unknown Artist' || !np.artist)
+          ? (np.recordLabel || 'Unknown Artist')
+          : np.artist;
+        artistEl.textContent = displayArtist;
+        setTimeout(() => checkMarquee(titleEl), 50);
+
+        // Progress (latency-adjusted)
+        const elapsed = Math.max(0, (np.elapsed || 0) - delaySeconds);
+        const dur = np.duration;
+        elapsedEl.textContent = fmtTime(elapsed);
+        durationEl.textContent = dur ? fmtTime(dur) : '—';
+        if (dur) {
+          progressEl.style.width = Math.min(100, (elapsed / dur) * 100) + '%';
+        }
+
+        // Up next
+        if (data.up_next && data.up_next.length > 0) {
+          const next = data.up_next[0];
+          const nextArtist = (next.artist === 'Unknown Artist' || !next.artist)
+            ? (next.recordLabel || 'Unknown Artist')
+            : next.artist;
+          upNextEl.textContent = `${next.title}${nextArtist ? ' — ' + nextArtist : ''}`;
+        }
+
+        // Track type badge
+        const typeMap = { SONG:'🎵 NOW PLAYING', AD:'💰 AD BREAK', JINGLE:'🎤 JINGLE', STATION_ID:'📻 STATION ID', FILLER:'🎵 NOW PLAYING' };
+        trackType.textContent = typeMap[np.fileType] || '🎵 NOW PLAYING';
+
+        if (sourceBadge) {
+          const srcText = np.playoutSource || 'AUTO-SCHEDULER';
+          sourceBadge.textContent = srcText;
+          if (srcText.includes('Manual Queue')) {
+            sourceBadge.style.color = '#00e1ff';
+            sourceBadge.style.borderColor = 'rgba(0, 225, 255, 0.3)';
+            sourceBadge.style.background = 'rgba(0, 225, 255, 0.08)';
+          } else if (srcText.includes('Random Library')) {
+            sourceBadge.style.color = '#ffb300';
+            sourceBadge.style.borderColor = 'rgba(255, 179, 0, 0.3)';
+            sourceBadge.style.background = 'rgba(255, 179, 0, 0.08)';
+          } else if (srcText.includes('Show:')) {
+            sourceBadge.style.color = '#e040fb';
+            sourceBadge.style.borderColor = 'rgba(224, 64, 251, 0.3)';
+            sourceBadge.style.background = 'rgba(224, 64, 251, 0.08)';
+          } else if (srcText.includes('Fallback Pool')) {
+            sourceBadge.style.color = '#ff9100';
+            sourceBadge.style.borderColor = 'rgba(255, 145, 0, 0.3)';
+            sourceBadge.style.background = 'rgba(255, 145, 0, 0.08)';
+          } else {
+            sourceBadge.style.color = '#00ff66';
+            sourceBadge.style.borderColor = 'rgba(0, 255, 102, 0.3)';
+            sourceBadge.style.background = 'rgba(0, 255, 102, 0.08)';
+          }
+        }
+
+        nowPlayingData = np;
+        lastTrackId = np.id;
+
+        // Render upcoming queue (Next tracks based on settings)
+        if (nextList) {
+          if (data.up_next && data.up_next.length > 0) {
+            const upcomingLimit = embedSettings.upcomingCount || 3;
+            const nextTracks = data.up_next.slice(0, upcomingLimit);
+            nextList.innerHTML = nextTracks.map(track => {
+              let coverUrl = track.coverArtUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+              if (track.fileType === 'AD' || track.fileType === 'PROMO') {
+                coverUrl = embedSettings.defaultAdCoverUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+              }
+              const displayArtist = (track.artist === 'Unknown Artist' || !track.artist)
+                ? (track.recordLabel || 'Unknown Artist')
+                : track.artist;
+              return `
+                <li class="track-item">
+                  <img class="track-item-cover" src="${coverUrl}" alt="Cover" onerror="this.src='https://play.vawam.ca/covers/default-vinyl.svg'">
+                  <div class="track-item-meta">
+                    <div class="track-item-title">${track.title || 'Unknown Track'}</div>
+                    <div class="track-item-artist">${displayArtist}</div>
+                  </div>
+                  <span class="track-item-time">${fmtTime(track.duration)}</span>
+                </li>
+              `;
+            }).join('');
+          } else {
+            nextList.innerHTML = '<li class="track-item-empty">Queue is empty</li>';
+          }
+        }
+
+        // Fetch and Render Past tracks based on settings
+        try {
+          const histRes = await fetch('https://play.vawam.ca/api/public/history');
+          if (histRes.ok) {
+            const historyData = await histRes.json();
+            const limit = embedSettings.recentlyPlayedCount || 5;
+            const pastTracks = historyData.slice(0, limit);
+            if (pastList) {
+              if (pastTracks.length > 0) {
+                pastList.innerHTML = pastTracks.map(track => {
+                  let coverUrl = track.coverArtUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+                  if (track.fileType === 'AD' || track.fileType === 'PROMO') {
+                    coverUrl = embedSettings.defaultAdCoverUrl || 'https://play.vawam.ca/covers/default-vinyl.svg';
+                  }
+                  const playedTime = track.playedAt ? new Date(track.playedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                  const displayArtist = (track.artist === 'Unknown Artist' || !track.artist)
+                    ? (track.recordLabel || 'Unknown Artist')
+                    : track.artist;
+                  return `
+                    <li class="track-item">
+                      <img class="track-item-cover" src="${coverUrl}" alt="Cover" onerror="this.src='https://play.vawam.ca/covers/default-vinyl.svg'">
+                      <div class="track-item-meta">
+                        <div class="track-item-title">${track.title || 'Unknown Track'}</div>
+                        <div class="track-item-artist">${displayArtist}</div>
+                      </div>
+                      <span class="track-item-time">${playedTime}</span>
+                    </li>
+                  `;
+                }).join('');
+              } else {
+                pastList.innerHTML = '<li class="track-item-empty">No recently played tracks</li>';
+              }
+            }
+          }
+        } catch (hErr) {
+          console.warn('Failed to fetch track history:', hErr);
+        }
+      } else {
+        cover.src = 'https://play.vawam.ca/covers/default-vinyl.svg';
+        titleEl.textContent = 'No Track Playing';
+        artistEl.textContent = 'Station Idle';
+        trackType.textContent = '📻 OFFLINE';
+        elapsedEl.textContent = '0:00';
+        durationEl.textContent = '—';
+        progressEl.style.width = '0%';
+        upNextEl.textContent = 'No upcoming tracks';
+        if (nextList) nextList.innerHTML = '<li class="track-item-empty">Queue is empty</li>';
+        if (sourceBadge) {
+          sourceBadge.textContent = 'STANDBY';
+          sourceBadge.style.color = '';
+          sourceBadge.style.borderColor = '';
+          sourceBadge.style.background = '';
+        }
+        nowPlayingData = null;
+        lastTrackId = null;
+      }
+    }
+
+    fetchNowPlaying();
+    setInterval(fetchNowPlaying, 4000);
+
+    // Setup Server-Sent Events (SSE) for instant metadata updates on manual cue/skip/swap
+    function connectNowPlayingSSE() {
+      const sseSource = new EventSource('/api/public/now-playing-sse');
+      
+      sseSource.onmessage = (event) => {
+        // Trigger immediate fetch to sync player UI instantly when track state changes on server
+        fetchNowPlaying();
+      };
+
+      sseSource.onerror = (err) => {
+        console.warn('Now Playing SSE connection lost. Falling back to HTTP polling.', err);
+        sseSource.close();
+        // Reconnect after 5 seconds
+        setTimeout(connectNowPlayingSSE, 5000);
+      };
+    }
+
+    connectNowPlayingSSE();
+
+    // ── Client Listener Session Heartbeat Ping ─────────────────
+    let listenerId = sessionStorage.getItem('vawam_listener_id');
+    if (!listenerId) {
+      listenerId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      sessionStorage.setItem('vawam_listener_id', listenerId);
+    }
+
+    async function sendListenerPing() {
+      if (!isPlaying) return; // Only ping when stream is actively playing
+      try {
+        await fetch('https://play.vawam.ca/api/public/listener-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            listenerId: listenerId,
+            userAgent: navigator.userAgent
+          })
+        });
+      } catch (e) {
+        console.warn('Listener ping failed', e);
+      }
+    }
+
+    // Ping every 10 seconds (heartbeat)
+    setInterval(sendListenerPing, 10000);
+    window.sendListenerPing = sendListenerPing;
+
+    // ── Load branding from settings ────────────────────────────
+    async function loadBranding() {
+      try {
+        const res = await fetch('/api/settings/public');
+        if (!res.ok) return;
+        const s = await res.json();
+        if (s.stationName) document.getElementById('stream-station-name').textContent = s.stationName;
+        if (s.logoUrl) document.getElementById('stream-logo').src = s.logoUrl;
+        if (s.seoTitle) document.title = s.seoTitle;
+      } catch(e) {}
+    }
+    loadBranding();
+  })();
+  </script>
 </body>
 </html>
